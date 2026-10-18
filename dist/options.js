@@ -105,6 +105,7 @@
   var folders = [];
   var dupGroups = [];
   var deadResults = [];
+  var tagMap = {};
   var activeTab = "dup";
   var selected = /* @__PURE__ */ new Set();
   var undoRecord = null;
@@ -168,6 +169,8 @@
       groups.set(key, list);
     }
     dupGroups = [...groups.entries()].filter(([, list]) => list.length > 1).map(([key, list]) => ({ key, members: list })).sort((a, b) => b.members.length - a.members.length);
+    const storedTags = await chrome.storage.local.get("tags");
+    tagMap = storedTags && storedTags.tags || {};
     undoRecord = await loadUndo();
     resetSelection();
     renderAll();
@@ -208,13 +211,29 @@
     scanBtn.hidden = activeTab !== "dead";
     scanCancelBtn.hidden = !(activeTab === "dead" && scanning);
   }
+  async function saveTags(url, tags) {
+    const next = { ...tagMap };
+    const cleaned = tags.map((t) => t.trim()).filter(Boolean);
+    if (cleaned.length) next[url] = cleaned;
+    else delete next[url];
+    tagMap = next;
+    await chrome.storage.local.set({ tags: next });
+    renderSummary();
+    renderTable();
+  }
+  async function editTags(item) {
+    const current = (tagMap[item.url] || []).join(", ");
+    const value = window.prompt("\u6807\u7B7E\uFF08\u9017\u53F7\u5206\u9694\uFF0C\u7559\u7A7A\u6E05\u9664\uFF09", current);
+    if (value === null) return;
+    await saveTags(item.url, value.split(/[,，]/));
+  }
   function renderSummary() {
     const untitled = items.filter((i) => !i.title.trim()).length;
     const http = items.filter((i) => i.url.startsWith("http://")).length;
     const extra = dupGroups.reduce((sum, g) => sum + g.members.length - 1, 0);
     const dead = deadResults.filter((r) => r.verdict === "dead").length;
     const unknown = deadResults.filter((r) => r.verdict === "unknown").length;
-    summary.innerHTML = "<span>\u4E66\u7B7E <b>" + items.length + "</b></span><span>\u6587\u4EF6\u5939 <b>" + folders.length + "</b></span><span>\u91CD\u590D\u7EC4 <b>" + dupGroups.length + "</b>\uFF08\u591A\u4F59 " + extra + " \u6761\uFF09</span><span>\u65E0\u6807\u9898 <b>" + untitled + "</b></span><span>HTTP <b>" + http + "</b></span>" + (deadResults.length ? "<span>\u7591\u4F3C\u5931\u6548 <b>" + dead + "</b>\uFF0C\u5F85\u786E\u8BA4 " + unknown + "</span>" : "");
+    summary.innerHTML = "<span>\u4E66\u7B7E <b>" + items.length + "</b></span><span>\u6587\u4EF6\u5939 <b>" + folders.length + "</b></span><span>\u91CD\u590D\u7EC4 <b>" + dupGroups.length + "</b>\uFF08\u591A\u4F59 " + extra + " \u6761\uFF09</span><span>\u65E0\u6807\u9898 <b>" + untitled + "</b></span><span>HTTP <b>" + http + "</b></span>" + (deadResults.length ? "<span>\u7591\u4F3C\u5931\u6548 <b>" + dead + "</b>\uFF0C\u5F85\u786E\u8BA4 " + unknown + "</span>" : "") + "<span>\u5DF2\u6253\u6807\u7B7E <b>" + Object.keys(tagMap).length + "</b> \u6761</span>";
   }
   function cell(text, className) {
     const td = document.createElement("td");
@@ -252,12 +271,13 @@
       if (className) th.className = className;
       trh.appendChild(th);
     };
-    const withCheck = activeTab !== "folders";
+    const withCheck = activeTab !== "folders" && activeTab !== "tags";
     if (withCheck) addTh("", "check");
     if (activeTab === "dup") ["\u7EC4", "\u6761\u6570", "\u6807\u9898", "\u8DEF\u5F84", "\u89C4\u8303\u5316 URL"].forEach((h) => addTh(h));
     else if (activeTab === "untitled") ["\u57DF\u540D", "\u8DEF\u5F84", "URL"].forEach((h) => addTh(h));
     else if (activeTab === "http") ["\u57DF\u540D", "\u6807\u9898", "URL"].forEach((h) => addTh(h));
     else if (activeTab === "dead") ["\u72B6\u6001", "\u6807\u9898", "\u8DEF\u5F84", "URL"].forEach((h) => addTh(h));
+    else if (activeTab === "tags") ["\u6807\u9898", "\u8DEF\u5F84", "\u6807\u7B7E", "\u64CD\u4F5C"].forEach((h) => addTh(h));
     else ["\u6587\u4EF6\u5939", "\u76F4\u63A5\u4E66\u7B7E", "\u5B50\u6811\u4E66\u7B7E"].forEach((h) => addTh(h));
     thead.appendChild(trh);
     table.appendChild(thead);
@@ -322,6 +342,32 @@
         tr.appendChild(cell(res.title || "\uFF08\u65E0\u6807\u9898\uFF09", "truncate"));
         tr.appendChild(cell(res.path, "truncate"));
         tr.appendChild(cell(res.url, "mono truncate"));
+        tbody.appendChild(tr);
+      });
+    } else if (activeTab === "tags") {
+      const tagged = items.filter((item) => (tagMap[item.url] || []).length > 0);
+      tagged.forEach((item) => {
+        const tr = document.createElement("tr");
+        tr.appendChild(cell(item.title || "\uFF08\u65E0\u6807\u9898\uFF09", "truncate"));
+        tr.appendChild(cell(item.path, "truncate"));
+        const tdTags = document.createElement("td");
+        (tagMap[item.url] || []).forEach((tag) => {
+          const chip = document.createElement("span");
+          chip.className = "tag";
+          chip.textContent = "#" + tag;
+          tdTags.appendChild(chip);
+        });
+        tr.appendChild(tdTags);
+        const tdOps = document.createElement("td");
+        const edit = document.createElement("button");
+        edit.textContent = "\u7F16\u8F91";
+        edit.addEventListener("click", () => void editTags(item));
+        const clear = document.createElement("button");
+        clear.textContent = "\u6E05\u9664";
+        clear.addEventListener("click", () => void saveTags(item.url, []));
+        tdOps.appendChild(edit);
+        tdOps.appendChild(clear);
+        tr.appendChild(tdOps);
         tbody.appendChild(tr);
       });
     } else {
@@ -484,6 +530,9 @@
     } else if (activeTab === "dead") {
       rows = [["verdict", "status", "error", "title", "path", "url"]];
       deadResults.forEach((r) => rows.push([r.verdict, r.status ? String(r.status) : "", r.error || "", r.title, r.path, r.url]));
+    } else if (activeTab === "tags") {
+      rows = [["title", "path", "tags", "url"]];
+      items.filter((i) => (tagMap[i.url] || []).length > 0).forEach((i) => rows.push([i.title, i.path, (tagMap[i.url] || []).join("|"), i.url]));
     } else {
       rows = [["folder", "direct", "subtree"]];
       folders.forEach((f) => rows.push([f.path, String(f.direct), String(f.subtree)]));

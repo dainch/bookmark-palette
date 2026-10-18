@@ -24512,6 +24512,21 @@ var indexBuiltAt = 0;
 var indexDirty = true;
 var stats = /* @__PURE__ */ new Map();
 var statsAt = 0;
+var tagMap = {};
+async function loadTags() {
+  try {
+    const data = await chrome.storage.local.get("tags");
+    tagMap = data && data.tags || {};
+  } catch {
+    tagMap = {};
+  }
+}
+void loadTags();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.tags) {
+    tagMap = changes.tags.newValue || {};
+  }
+});
 async function collectBookmarks() {
   const tree = await chrome.bookmarks.getTree();
   const out = [];
@@ -24593,13 +24608,21 @@ async function openPalette() {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== "object") return;
   if (msg.type === "getIndex") {
-    ensureIndex().then((items) => sendResponse({ items, builtAt: indexBuiltAt })).catch((err) => sendResponse({ error: String(err) }));
+    ensureIndex().then((items) => sendResponse({ items: items.map((item) => ({ ...item, tags: tagMap[item.url] || [] })), builtAt: indexBuiltAt })).catch((err) => sendResponse({ error: String(err) }));
     return true;
   }
   if (msg.type === "open" && typeof msg.url === "string") {
     void openUrl(msg.url, msg.disposition, sender && sender.tab ? sender.tab.id : void 0);
     sendResponse({ ok: true });
     return false;
+  }
+  if (msg.type === "setTags" && typeof msg.url === "string" && Array.isArray(msg.tags)) {
+    const tags = msg.tags.map((t) => String(t).trim()).filter(Boolean);
+    const next = { ...tagMap };
+    if (tags.length) next[msg.url] = tags;
+    else delete next[msg.url];
+    chrome.storage.local.set({ tags: next }).then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
+    return true;
   }
   if (msg.type === "refresh") {
     indexDirty = true;
@@ -24621,5 +24644,20 @@ for (const eventName of ["onCreated", "onRemoved", "onChanged", "onMoved"]) {
   });
 }
 chrome.runtime.onInstalled.addListener(() => {
+  try {
+    chrome.contextMenus.create({
+      id: "bm-save-suggest",
+      title: "\u4E66\u7B7E\u79D2\u641C\uFF1A\u6536\u85CF\u5230\u63A8\u8350\u6587\u4EF6\u5939",
+      contexts: ["page", "link"]
+    });
+  } catch {
+  }
   void ensureIndex(true).catch(() => void 0);
+});
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  const url = info && info.linkUrl || tab && tab.url || "";
+  const title = tab && tab.title || "";
+  void chrome.tabs.create({
+    url: chrome.runtime.getURL("suggest.html") + "?url=" + encodeURIComponent(url) + "&title=" + encodeURIComponent(title)
+  });
 });

@@ -158,6 +158,8 @@
 .bm-main { min-width: 0; flex: 1 1 auto; }
 .bm-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bm-sub { font-size: 12px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.bm-tags { display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
+.bm-tag { font-size: 10px; color: #4f46e5; background: #eef2ff; border-radius: 999px; padding: 0 6px; }
 .bm-badge { font-size: 10px; color: #b45309; background: #fef3c7; border-radius: 999px; padding: 1px 6px; margin-left: 8px; flex: 0 0 auto; }
 .bm-domain { font-size: 11px; color: #94a3b8; margin-left: auto; padding-left: 8px; flex: 0 0 auto; max-width: 28%; overflow: hidden; text-overflow: ellipsis; }
 .bm-foot { display: flex; gap: 14px; padding: 8px 16px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; }
@@ -193,7 +195,7 @@
     for (let i = 0; i < seed.length; i += 1) h = h * 31 + seed.charCodeAt(i) >>> 0;
     return "hsl(" + hues[h % hues.length] + " 68% 45%)";
   }
-  function mountPalette(container, getItems, openUrl) {
+  function mountPalette(container, getItems, openUrl, saveTags) {
     applyCss(container);
     const wrap = document.createElement("div");
     wrap.className = "bm-wrap";
@@ -211,7 +213,7 @@
     list.setAttribute("role", "listbox");
     const foot = document.createElement("div");
     foot.className = "bm-foot";
-    foot.innerHTML = "<span><span class='bm-kbd'>\u2191</span> <span class='bm-kbd'>\u2193</span> \u9009\u62E9</span><span><span class='bm-kbd'>Enter</span> \u5F53\u524D\u6807\u7B7E\u6253\u5F00</span><span><span class='bm-kbd'>Ctrl+Enter</span> \u65B0\u6807\u7B7E</span><span><span class='bm-kbd'>Shift+Enter</span> \u65B0\u7A97\u53E3</span><span><span class='bm-kbd'>Esc</span> \u5173\u95ED</span>";
+    foot.innerHTML = "<span><span class='bm-kbd'>\u2191</span> <span class='bm-kbd'>\u2193</span> \u9009\u62E9</span><span><span class='bm-kbd'>Enter</span> \u5F53\u524D\u6807\u7B7E\u6253\u5F00</span><span><span class='bm-kbd'>Ctrl+Enter</span> \u65B0\u6807\u7B7E</span><span><span class='bm-kbd'>Shift+Enter</span> \u65B0\u7A97\u53E3</span><span><span class='bm-kbd'>Ctrl+T</span> \u6807\u7B7E</span><span><span class='bm-kbd'>Esc</span> \u5173\u95ED</span>";
     panel.appendChild(input);
     panel.appendChild(status);
     panel.appendChild(list);
@@ -240,6 +242,14 @@
     }
     function compute() {
       const q = input.value.trim();
+      const tagMatch = q.match(/^tag:(\S+)\s*(.*)$/i);
+      if (tagMatch) {
+        const tag = tagMatch[1].toLowerCase();
+        const rest = tagMatch[2].trim();
+        let pool = (items || []).filter((i) => (i.tags || []).some((t) => t.toLowerCase() === tag));
+        if (rest) pool = searchBookmarks(pool, rest, 40);
+        return collapseDuplicates(pool);
+      }
       const raw = q ? searchBookmarks(items || [], q, 40) : topByUsage(items || [], 12);
       return collapseDuplicates(raw);
     }
@@ -280,6 +290,17 @@
         sub.textContent = item.path || "\u4E66\u7B7E\u680F";
         main.appendChild(title);
         main.appendChild(sub);
+        if (item.tags && item.tags.length) {
+          const tagWrap = document.createElement("div");
+          tagWrap.className = "bm-tags";
+          item.tags.slice(0, 4).forEach((tag) => {
+            const chip = document.createElement("span");
+            chip.className = "bm-tag";
+            chip.textContent = "#" + tag;
+            tagWrap.appendChild(chip);
+          });
+          main.appendChild(tagWrap);
+        }
         const domain = document.createElement("div");
         domain.className = "bm-domain";
         domain.textContent = item.domain || "";
@@ -325,6 +346,24 @@
       openUrl(item.url, disposition);
       close();
     }
+    async function editTags() {
+      const item = results[selected];
+      if (!item || !saveTags) return;
+      const current = (item.tags || []).join(", ");
+      const inputValue = window.prompt("\u7ED9\u8FD9\u6761\u4E66\u7B7E\u6253\u6807\u7B7E\uFF08\u9017\u53F7\u5206\u9694\uFF0C\u7559\u7A7A\u6E05\u9664\uFF09", current);
+      if (inputValue === null) return;
+      const tags = inputValue.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
+      try {
+        await saveTags(item.url, tags);
+        item.tags = tags;
+        const index = (results || []).findIndex((r) => r.url === item.url);
+        if (index >= 0) results[index] = item;
+        render();
+        status.textContent = tags.length ? "\u5DF2\u4FDD\u5B58\u6807\u7B7E\uFF1A" + tags.join(", ") : "\u5DF2\u6E05\u9664\u6807\u7B7E";
+      } catch {
+        status.textContent = "\u6807\u7B7E\u4FDD\u5B58\u5931\u8D25";
+      }
+    }
     function close() {
       isOpen = false;
       wrap.classList.remove("bm-open");
@@ -358,6 +397,9 @@
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
         move(-1);
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "t") {
+        event.preventDefault();
+        void editTags();
       } else if (event.key === "Enter") {
         event.preventDefault();
         const disposition = event.ctrlKey || event.metaKey ? "newtab" : event.shiftKey ? "window" : "current";
@@ -393,6 +435,9 @@
         },
         (url, disposition) => {
           void chrome.runtime.sendMessage({ type: "open", url, disposition });
+        },
+        async (url, tags) => {
+          await chrome.runtime.sendMessage({ type: "setTags", url, tags });
         }
       );
       return handle;

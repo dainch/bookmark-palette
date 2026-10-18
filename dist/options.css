@@ -45,3 +45,6 @@ td.check, th.check { width: 36px; }
 .tag.unknown { background: #fef3c7; color: #b45309; }
 .tag.ok { background: #dcfce7; color: #15803d; }
 .empty { padding: 24px; text-align: center; color: var(--muted); }
+
+td button { margin-right: 6px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); cursor: pointer; font-size: 12px; }
+td button:hover { background: var(--line); }

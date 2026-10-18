@@ -41,6 +41,8 @@ const CSS = `
 .bm-main { min-width: 0; flex: 1 1 auto; }
 .bm-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bm-sub { font-size: 12px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.bm-tags { display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
+.bm-tag { font-size: 10px; color: #4f46e5; background: #eef2ff; border-radius: 999px; padding: 0 6px; }
 .bm-badge { font-size: 10px; color: #b45309; background: #fef3c7; border-radius: 999px; padding: 1px 6px; margin-left: 8px; flex: 0 0 auto; }
 .bm-domain { font-size: 11px; color: #94a3b8; margin-left: auto; padding-left: 8px; flex: 0 0 auto; max-width: 28%; overflow: hidden; text-overflow: ellipsis; }
 .bm-foot { display: flex; gap: 14px; padding: 8px 16px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; }
@@ -82,7 +84,8 @@ function colorFor(seed: string): string {
 export function mountPalette(
   container: ShadowRoot | HTMLElement,
   getItems: () => Promise<BookmarkHit[]>,
-  openUrl: (url: string, disposition: Disposition) => void
+  openUrl: (url: string, disposition: Disposition) => void,
+  saveTags?: (url: string, tags: string[]) => Promise<void>
 ): PaletteHandle {
   applyCss(container);
 
@@ -112,7 +115,7 @@ export function mountPalette(
     "<span><span class='bm-kbd'>Enter</span> 当前标签打开</span>" +
     "<span><span class='bm-kbd'>Ctrl+Enter</span> 新标签</span>" +
     "<span><span class='bm-kbd'>Shift+Enter</span> 新窗口</span>" +
-    "<span><span class='bm-kbd'>Esc</span> 关闭</span>";
+    "<span><span class='bm-kbd'>Ctrl+T</span> 标签</span><span><span class='bm-kbd'>Esc</span> 关闭</span>";
 
   panel.appendChild(input);
   panel.appendChild(status);
@@ -148,6 +151,14 @@ export function mountPalette(
 
   function compute(): BookmarkHit[] {
     const q = input.value.trim();
+    const tagMatch = q.match(/^tag:(\S+)\s*(.*)$/i);
+    if (tagMatch) {
+      const tag = tagMatch[1].toLowerCase();
+      const rest = tagMatch[2].trim();
+      let pool = (items || []).filter((i) => (i.tags || []).some((t) => t.toLowerCase() === tag));
+      if (rest) pool = searchBookmarks(pool, rest, 40);
+      return collapseDuplicates(pool);
+    }
     const raw = q ? searchBookmarks(items || [], q, 40) : topByUsage(items || [], 12);
     return collapseDuplicates(raw);
   }
@@ -196,6 +207,17 @@ export function mountPalette(
       sub.textContent = item.path || "书签栏";
       main.appendChild(title);
       main.appendChild(sub);
+      if (item.tags && item.tags.length) {
+        const tagWrap = document.createElement("div");
+        tagWrap.className = "bm-tags";
+        item.tags.slice(0, 4).forEach((tag) => {
+          const chip = document.createElement("span");
+          chip.className = "bm-tag";
+          chip.textContent = "#" + tag;
+          tagWrap.appendChild(chip);
+        });
+        main.appendChild(tagWrap);
+      }
 
       const domain = document.createElement("div");
       domain.className = "bm-domain";
@@ -248,6 +270,28 @@ export function mountPalette(
     close();
   }
 
+  async function editTags(): Promise<void> {
+    const item = results[selected];
+    if (!item || !saveTags) return;
+    const current = (item.tags || []).join(", ");
+    const inputValue = window.prompt("给这条书签打标签（逗号分隔，留空清除）", current);
+    if (inputValue === null) return;
+    const tags = inputValue
+      .split(/[,，]/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    try {
+      await saveTags(item.url, tags);
+      item.tags = tags;
+      const index = (results || []).findIndex((r) => r.url === item.url);
+      if (index >= 0) results[index] = item;
+      render();
+      status.textContent = tags.length ? "已保存标签：" + tags.join(", ") : "已清除标签";
+    } catch {
+      status.textContent = "标签保存失败";
+    }
+  }
+
   function close(): void {
     isOpen = false;
     wrap.classList.remove("bm-open");
@@ -284,6 +328,9 @@ export function mountPalette(
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
       move(-1);
+    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "t") {
+      event.preventDefault();
+      void editTags();
     } else if (event.key === "Enter") {
       event.preventDefault();
       const disposition: Disposition = event.ctrlKey || event.metaKey ? "newtab" : event.shiftKey ? "window" : "current";

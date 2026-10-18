@@ -10,6 +10,24 @@ let indexBuiltAt = 0;
 let indexDirty = true;
 let stats = new Map<string, HistoryStat>();
 let statsAt = 0;
+let tagMap: Record<string, string[]> = {};
+
+async function loadTags(): Promise<void> {
+  try {
+    const data = await chrome.storage.local.get("tags");
+    tagMap = (data && data.tags) || {};
+  } catch {
+    tagMap = {};
+  }
+}
+
+void loadTags();
+
+chrome.storage.onChanged.addListener((changes: any, area: string) => {
+  if (area === "local" && changes.tags) {
+    tagMap = changes.tags.newValue || {};
+  }
+});
 
 async function collectBookmarks(): Promise<RawBookmark[]> {
   const tree = await chrome.bookmarks.getTree();
@@ -99,7 +117,7 @@ chrome.runtime.onMessage.addListener((msg: any, sender: any, sendResponse: any) 
   if (!msg || typeof msg !== "object") return;
   if (msg.type === "getIndex") {
     ensureIndex()
-      .then((items) => sendResponse({ items, builtAt: indexBuiltAt }))
+      .then((items) => sendResponse({ items: items.map((item) => ({ ...item, tags: tagMap[item.url] || [] })), builtAt: indexBuiltAt }))
       .catch((err) => sendResponse({ error: String(err) }));
     return true;
   }
@@ -107,6 +125,17 @@ chrome.runtime.onMessage.addListener((msg: any, sender: any, sendResponse: any) 
     void openUrl(msg.url, msg.disposition, sender && sender.tab ? sender.tab.id : undefined);
     sendResponse({ ok: true });
     return false;
+  }
+  if (msg.type === "setTags" && typeof msg.url === "string" && Array.isArray(msg.tags)) {
+    const tags = msg.tags.map((t: string) => String(t).trim()).filter(Boolean);
+    const next = { ...tagMap };
+    if (tags.length) next[msg.url] = tags;
+    else delete next[msg.url];
+    chrome.storage.local
+      .set({ tags: next })
+      .then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
   }
   if (msg.type === "refresh") {
     indexDirty = true;
@@ -132,5 +161,22 @@ for (const eventName of ["onCreated", "onRemoved", "onChanged", "onMoved"]) {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
+  try {
+    chrome.contextMenus.create({
+      id: "bm-save-suggest",
+      title: "书签秒搜：收藏到推荐文件夹",
+      contexts: ["page", "link"]
+    });
+  } catch {
+    // 已存在
+  }
   void ensureIndex(true).catch(() => undefined);
+});
+
+chrome.contextMenus.onClicked.addListener((info: any, tab: any) => {
+  const url = (info && info.linkUrl) || (tab && tab.url) || "";
+  const title = (tab && tab.title) || "";
+  void chrome.tabs.create({
+    url: chrome.runtime.getURL("suggest.html") + "?url=" + encodeURIComponent(url) + "&title=" + encodeURIComponent(title)
+  });
 });

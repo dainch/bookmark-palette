@@ -12,7 +12,7 @@ interface Item {
   dateAdded: number;
 }
 
-type Tab = "dup" | "untitled" | "http" | "dead" | "folders";
+type Tab = "dup" | "untitled" | "http" | "dead" | "tags" | "folders";
 
 interface DeadResult extends Item {
   status: number | null;
@@ -24,6 +24,7 @@ let items: Item[] = [];
 let folders: { path: string; direct: number; subtree: number }[] = [];
 let dupGroups: { key: string; members: Item[] }[] = [];
 let deadResults: DeadResult[] = [];
+let tagMap: Record<string, string[]> = {};
 let activeTab: Tab = "dup";
 let selected = new Set<string>();
 let undoRecord: UndoRecord | null = null;
@@ -98,6 +99,8 @@ async function collect(): Promise<void> {
     .map(([key, list]) => ({ key, members: list }))
     .sort((a, b) => b.members.length - a.members.length);
 
+  const storedTags = await chrome.storage.local.get("tags");
+  tagMap = (storedTags && storedTags.tags) || {};
   undoRecord = await loadUndo();
   resetSelection();
   renderAll();
@@ -142,6 +145,24 @@ function updateToolbar(): void {
   scanCancelBtn.hidden = !(activeTab === "dead" && scanning);
 }
 
+async function saveTags(url: string, tags: string[]): Promise<void> {
+  const next = { ...tagMap };
+  const cleaned = tags.map((t) => t.trim()).filter(Boolean);
+  if (cleaned.length) next[url] = cleaned;
+  else delete next[url];
+  tagMap = next;
+  await chrome.storage.local.set({ tags: next });
+  renderSummary();
+  renderTable();
+}
+
+async function editTags(item: Item): Promise<void> {
+  const current = (tagMap[item.url] || []).join(", ");
+  const value = window.prompt("标签（逗号分隔，留空清除）", current);
+  if (value === null) return;
+  await saveTags(item.url, value.split(/[,，]/));
+}
+
 function renderSummary(): void {
   const untitled = items.filter((i) => !i.title.trim()).length;
   const http = items.filter((i) => i.url.startsWith("http://")).length;
@@ -154,7 +175,8 @@ function renderSummary(): void {
     "<span>重复组 <b>" + dupGroups.length + "</b>（多余 " + extra + " 条）</span>" +
     "<span>无标题 <b>" + untitled + "</b></span>" +
     "<span>HTTP <b>" + http + "</b></span>" +
-    (deadResults.length ? "<span>疑似失效 <b>" + dead + "</b>，待确认 " + unknown + "</span>" : "");
+    (deadResults.length ? "<span>疑似失效 <b>" + dead + "</b>，待确认 " + unknown + "</span>" : "") +
+    "<span>已打标签 <b>" + Object.keys(tagMap).length + "</b> 条</span>";
 }
 
 function cell(text: string, className?: string): HTMLTableCellElement {
@@ -195,12 +217,13 @@ function renderTable(): void {
     if (className) th.className = className;
     trh.appendChild(th);
   };
-  const withCheck = activeTab !== "folders";
+  const withCheck = activeTab !== "folders" && activeTab !== "tags";
   if (withCheck) addTh("", "check");
   if (activeTab === "dup") ["组", "条数", "标题", "路径", "规范化 URL"].forEach((h) => addTh(h));
   else if (activeTab === "untitled") ["域名", "路径", "URL"].forEach((h) => addTh(h));
   else if (activeTab === "http") ["域名", "标题", "URL"].forEach((h) => addTh(h));
   else if (activeTab === "dead") ["状态", "标题", "路径", "URL"].forEach((h) => addTh(h));
+  else if (activeTab === "tags") ["标题", "路径", "标签", "操作"].forEach((h) => addTh(h));
   else ["文件夹", "直接书签", "子树书签"].forEach((h) => addTh(h));
   thead.appendChild(trh);
   table.appendChild(thead);
@@ -267,6 +290,32 @@ function renderTable(): void {
       tr.appendChild(cell(res.title || "（无标题）", "truncate"));
       tr.appendChild(cell(res.path, "truncate"));
       tr.appendChild(cell(res.url, "mono truncate"));
+      tbody.appendChild(tr);
+    });
+  } else if (activeTab === "tags") {
+    const tagged = items.filter((item) => (tagMap[item.url] || []).length > 0);
+    tagged.forEach((item) => {
+      const tr = document.createElement("tr");
+      tr.appendChild(cell(item.title || "（无标题）", "truncate"));
+      tr.appendChild(cell(item.path, "truncate"));
+      const tdTags = document.createElement("td");
+      (tagMap[item.url] || []).forEach((tag) => {
+        const chip = document.createElement("span");
+        chip.className = "tag";
+        chip.textContent = "#" + tag;
+        tdTags.appendChild(chip);
+      });
+      tr.appendChild(tdTags);
+      const tdOps = document.createElement("td");
+      const edit = document.createElement("button");
+      edit.textContent = "编辑";
+      edit.addEventListener("click", () => void editTags(item));
+      const clear = document.createElement("button");
+      clear.textContent = "清除";
+      clear.addEventListener("click", () => void saveTags(item.url, []));
+      tdOps.appendChild(edit);
+      tdOps.appendChild(clear);
+      tr.appendChild(tdOps);
       tbody.appendChild(tr);
     });
   } else {
@@ -451,6 +500,11 @@ function exportCsv(): void {
   } else if (activeTab === "dead") {
     rows = [["verdict", "status", "error", "title", "path", "url"]];
     deadResults.forEach((r) => rows.push([r.verdict, r.status ? String(r.status) : "", r.error || "", r.title, r.path, r.url]));
+  } else if (activeTab === "tags") {
+    rows = [["title", "path", "tags", "url"]];
+    items
+      .filter((i) => (tagMap[i.url] || []).length > 0)
+      .forEach((i) => rows.push([i.title, i.path, (tagMap[i.url] || []).join("|"), i.url]));
   } else {
     rows = [["folder", "direct", "subtree"]];
     folders.forEach((f) => rows.push([f.path, String(f.direct), String(f.subtree)]));

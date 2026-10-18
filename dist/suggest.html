@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>收藏到推荐文件夹 · 书签秒搜</title>
+    <link rel="stylesheet" href="suggest.css" />
+  </head>
+  <body>
+    <main>
+      <h1>收藏到推荐文件夹</h1>
+      <p class="note">根据标题和网址里的关键词，推荐最可能合适的文件夹。建议仅供参考，保存前可改。</p>
+      <label class="field">标题<input id="title" type="text" /></label>
+      <label class="field">网址<input id="url" type="text" /></label>
+      <div class="actions">
+        <button id="save-root">直接保存到书签栏</button>
+        <span id="status"></span>
+      </div>
+      <h2>推荐文件夹</h2>
+      <div id="list" class="list"><div class="empty">正在分析…</div></div>
+    </main>
+    <script src="suggest.js"></script>
+  </body>
+</html>

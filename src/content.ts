@@ -31,6 +31,9 @@ if (!g.__bmPaletteInstalled) {
       },
       (url, disposition) => {
         void chrome.runtime.sendMessage({ type: "open", url, disposition });
+      },
+      async (url, tags) => {
+        await chrome.runtime.sendMessage({ type: "setTags", url, tags });
       }
     );
     return handle;

@@ -19,6 +19,9 @@ const handle = mountPalette(
       void chrome.tabs.create({ url });
       window.close();
     }
+  },
+  async (url, tags) => {
+    await chrome.runtime.sendMessage({ type: "setTags", url, tags });
   }
 );
 

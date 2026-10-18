@@ -22,6 +22,7 @@ export interface BookmarkHit extends RawBookmark {
   pinyinInitials: string;
   visits: number;
   lastVisit: number;
+  tags?: string[];
   score?: number;
 }
 
