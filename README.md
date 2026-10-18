@@ -6,7 +6,7 @@
 
 ### 搜索
 
-- **全局命令面板**：默认 `Ctrl+Shift+K`（macOS `Command+Shift+K`）呼出，覆盖当前页面，输入即搜。
+- **全局命令面板**：默认 `Alt+Shift+K` 呼出（Chrome 里 `Ctrl+Shift+K` 常被其它扩展占用，装好后可在 `chrome://extensions/shortcuts` 改键），覆盖当前页面，输入即搜。
 - **搜索范围**：标题、URL、域名、完整文件夹路径。
 - **中文/拼音**：中文关键词、全拼（`gongcheng`）、首字母（`gc` → 工程）。
 - **排序**：匹配度 + 本地历史访问频次 + 最近访问（`history` 只读，不上传）。
