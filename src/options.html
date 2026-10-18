@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>书签体检 · 书签秒搜</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <header>
+      <h1>书签体检与清理</h1>
+      <p class="note">默认只读；只有你勾选并确认后才会删除。删除前会自动导出一份 JSON 备份，并支持「撤销上次」。</p>
+      <nav id="tabs">
+        <button data-tab="dup" class="active">重复 URL</button>
+        <button data-tab="untitled">无标题</button>
+        <button data-tab="http">HTTP</button>
+        <button data-tab="dead">失效链接</button>
+        <button data-tab="folders">文件夹统计</button>
+      </nav>
+      <div class="toolbar">
+        <button id="refresh">重新检查</button>
+        <button id="scan">扫描失效链接</button>
+        <button id="scan-cancel" hidden>停止扫描</button>
+        <button id="select-all">全选</button>
+        <button id="select-none">取消全选</button>
+        <button id="export">导出 CSV</button>
+        <button id="delete" class="danger" disabled>删除选中</button>
+        <button id="undo" hidden>撤销上次</button>
+        <span id="status"></span>
+      </div>
+      <div id="progress" class="progress" hidden><div id="progress-bar"></div></div>
+      <div id="summary" class="summary"></div>
+    </header>
+    <main id="content"></main>
+    <script src="options.js"></script>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "bookmark-palette",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Chrome 书签秒搜扩展：命令面板 + 中文拼音 + 频次排序 + 书签体检",
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "test": "node scripts/test-search.mjs"
+  },
+  "dependencies": {
+    "pinyin-pro": "^3.27.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
