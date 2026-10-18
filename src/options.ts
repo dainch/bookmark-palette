@@ -246,7 +246,7 @@ function renderTable(): void {
     });
   } else if (activeTab === "dead") {
     if (!deadResults.length) {
-      content.innerHTML = '<div class="empty">还没有扫描结果。点上方「扫描失效链接」开始（会向书签网址发请求，可随时停止）。</div>';
+      content.innerHTML = '<div class="empty">还没有扫描结果。点上方「扫描失效链接」开始（会向书签网址发请求，可随时停止）。注意：VPN/代理会影响判定，只有 404/410 会默认勾选，超时和 403/429/5xx 一律标「待确认」。</div>';
       return;
     }
     const rows = [...deadResults].sort((a, b) => {
@@ -337,29 +337,56 @@ function isPrivateHost(url: string): boolean {
   }
 }
 
-async function checkUrl(url: string, signal: AbortSignal): Promise<{ status: number | null; verdict: "dead" | "unknown" | "ok"; error?: string }> {
-  if (!/^https?:/i.test(url)) return { status: null, verdict: "unknown", error: "非 http" };
-  if (isPrivateHost(url)) return { status: null, verdict: "unknown", error: "本地地址，跳过" };
+async function requestOnce(
+  url: string,
+  method: "HEAD" | "GET",
+  timeoutMs: number,
+  signal: AbortSignal
+): Promise<{ status: number | null; error?: string }> {
   const ctrl = new AbortController();
   const onAbort = () => ctrl.abort();
   signal.addEventListener("abort", onAbort, { once: true });
-  const timer = setTimeout(() => ctrl.abort(), 8000);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    let res = await fetch(url, { method: "HEAD", redirect: "follow", signal: ctrl.signal, cache: "no-store" });
-    if (res.status === 405 || res.status === 501) {
-      res = await fetch(url, { method: "GET", redirect: "follow", signal: ctrl.signal, cache: "no-store" });
-    }
-    const s = res.status;
-    let verdict: "dead" | "unknown" | "ok" = s >= 400 ? "dead" : "ok";
-    if (s === 401 || s === 403 || s === 405 || s === 429) verdict = "unknown";
-    return { status: s, verdict, error: verdict === "dead" ? "HTTP " + s : undefined };
+    const res = await fetch(url, { method, redirect: "follow", signal: ctrl.signal, cache: "no-store" });
+    return { status: res.status };
   } catch {
-    if (signal.aborted) return { status: null, verdict: "unknown", error: "已停止" };
-    return { status: null, verdict: "dead", error: "请求失败或超时" };
+    return { status: null, error: "请求失败或超时" };
   } finally {
     clearTimeout(timer);
     signal.removeEventListener("abort", onAbort);
   }
+}
+
+async function checkUrl(
+  url: string,
+  signal: AbortSignal
+): Promise<{ status: number | null; verdict: "dead" | "unknown" | "ok"; error?: string }> {
+  if (!/^https?:/i.test(url)) return { status: null, verdict: "unknown", error: "非 http" };
+  if (isPrivateHost(url)) return { status: null, verdict: "unknown", error: "本地地址，跳过" };
+  if (signal.aborted) return { status: null, verdict: "unknown", error: "已停止" };
+
+  // 代理/VPN 环境下 HEAD 常被拒或超时，先 HEAD 再 GET，仍失败则退避重试一次。
+  let result = await requestOnce(url, "HEAD", 10000, signal);
+  if (result.status === 405 || result.status === 501 || result.status === null) {
+    result = await requestOnce(url, "GET", 10000, signal);
+  }
+  if (result.status === null) {
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    result = await requestOnce(url, "GET", 12000, signal);
+  }
+  if (result.status === null) {
+    return { status: null, verdict: "unknown", error: "请求失败或超时（待确认）" };
+  }
+
+  const status = result.status;
+  if (status === 404 || status === 410) {
+    return { status, verdict: "dead", error: "HTTP " + status };
+  }
+  if (status >= 200 && status < 400) {
+    return { status, verdict: "ok" };
+  }
+  return { status, verdict: "unknown", error: "HTTP " + status + "（待确认）" };
 }
 
 function updateProgress(done: number, total: number): void {

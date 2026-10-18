@@ -301,7 +301,7 @@
       });
     } else if (activeTab === "dead") {
       if (!deadResults.length) {
-        content.innerHTML = '<div class="empty">\u8FD8\u6CA1\u6709\u626B\u63CF\u7ED3\u679C\u3002\u70B9\u4E0A\u65B9\u300C\u626B\u63CF\u5931\u6548\u94FE\u63A5\u300D\u5F00\u59CB\uFF08\u4F1A\u5411\u4E66\u7B7E\u7F51\u5740\u53D1\u8BF7\u6C42\uFF0C\u53EF\u968F\u65F6\u505C\u6B62\uFF09\u3002</div>';
+        content.innerHTML = '<div class="empty">\u8FD8\u6CA1\u6709\u626B\u63CF\u7ED3\u679C\u3002\u70B9\u4E0A\u65B9\u300C\u626B\u63CF\u5931\u6548\u94FE\u63A5\u300D\u5F00\u59CB\uFF08\u4F1A\u5411\u4E66\u7B7E\u7F51\u5740\u53D1\u8BF7\u6C42\uFF0C\u53EF\u968F\u65F6\u505C\u6B62\uFF09\u3002\u6CE8\u610F\uFF1AVPN/\u4EE3\u7406\u4F1A\u5F71\u54CD\u5224\u5B9A\uFF0C\u53EA\u6709 404/410 \u4F1A\u9ED8\u8BA4\u52FE\u9009\uFF0C\u8D85\u65F6\u548C 403/429/5xx \u4E00\u5F8B\u6807\u300C\u5F85\u786E\u8BA4\u300D\u3002</div>';
         return;
       }
       const rows = [...deadResults].sort((a, b) => {
@@ -386,29 +386,44 @@
       return true;
     }
   }
-  async function checkUrl(url, signal) {
-    if (!/^https?:/i.test(url)) return { status: null, verdict: "unknown", error: "\u975E http" };
-    if (isPrivateHost(url)) return { status: null, verdict: "unknown", error: "\u672C\u5730\u5730\u5740\uFF0C\u8DF3\u8FC7" };
+  async function requestOnce(url, method, timeoutMs, signal) {
     const ctrl = new AbortController();
     const onAbort = () => ctrl.abort();
     signal.addEventListener("abort", onAbort, { once: true });
-    const timer = setTimeout(() => ctrl.abort(), 8e3);
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      let res = await fetch(url, { method: "HEAD", redirect: "follow", signal: ctrl.signal, cache: "no-store" });
-      if (res.status === 405 || res.status === 501) {
-        res = await fetch(url, { method: "GET", redirect: "follow", signal: ctrl.signal, cache: "no-store" });
-      }
-      const s = res.status;
-      let verdict = s >= 400 ? "dead" : "ok";
-      if (s === 401 || s === 403 || s === 405 || s === 429) verdict = "unknown";
-      return { status: s, verdict, error: verdict === "dead" ? "HTTP " + s : void 0 };
+      const res = await fetch(url, { method, redirect: "follow", signal: ctrl.signal, cache: "no-store" });
+      return { status: res.status };
     } catch {
-      if (signal.aborted) return { status: null, verdict: "unknown", error: "\u5DF2\u505C\u6B62" };
-      return { status: null, verdict: "dead", error: "\u8BF7\u6C42\u5931\u8D25\u6216\u8D85\u65F6" };
+      return { status: null, error: "\u8BF7\u6C42\u5931\u8D25\u6216\u8D85\u65F6" };
     } finally {
       clearTimeout(timer);
       signal.removeEventListener("abort", onAbort);
     }
+  }
+  async function checkUrl(url, signal) {
+    if (!/^https?:/i.test(url)) return { status: null, verdict: "unknown", error: "\u975E http" };
+    if (isPrivateHost(url)) return { status: null, verdict: "unknown", error: "\u672C\u5730\u5730\u5740\uFF0C\u8DF3\u8FC7" };
+    if (signal.aborted) return { status: null, verdict: "unknown", error: "\u5DF2\u505C\u6B62" };
+    let result = await requestOnce(url, "HEAD", 1e4, signal);
+    if (result.status === 405 || result.status === 501 || result.status === null) {
+      result = await requestOnce(url, "GET", 1e4, signal);
+    }
+    if (result.status === null) {
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      result = await requestOnce(url, "GET", 12e3, signal);
+    }
+    if (result.status === null) {
+      return { status: null, verdict: "unknown", error: "\u8BF7\u6C42\u5931\u8D25\u6216\u8D85\u65F6\uFF08\u5F85\u786E\u8BA4\uFF09" };
+    }
+    const status2 = result.status;
+    if (status2 === 404 || status2 === 410) {
+      return { status: status2, verdict: "dead", error: "HTTP " + status2 };
+    }
+    if (status2 >= 200 && status2 < 400) {
+      return { status: status2, verdict: "ok" };
+    }
+    return { status: status2, verdict: "unknown", error: "HTTP " + status2 + "\uFF08\u5F85\u786E\u8BA4\uFF09" };
   }
   function updateProgress(done, total) {
     progress.hidden = false;

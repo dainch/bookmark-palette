@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "书签秒搜 Bookmark Palette",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ctrl+Shift+K 全局模糊搜索 Chrome 书签，支持中文/拼音首字母、文件夹路径显示和书签体检。全部本地运行。",
   "permissions": [
     "bookmarks",
